@@ -1,2 +1,40 @@
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+*.secret
+credentials.*
+
+# Claude Code local state
+.claude/
+
+# pytest
+.pytest_cache/
+
+# Output files (generated, not source)
+output/*.pptx
