@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PPT Restyle</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --primary: #4F46E5;
+      --primary-hover: #4338CA;
+      --success: #059669;
+      --success-bg: #ECFDF5;
+      --error: #DC2626;
+      --error-bg: #FEF2F2;
+      --gray-50: #F8FAFC;
+      --gray-100: #F1F5F9;
+      --gray-200: #E2E8F0;
+      --gray-300: #CBD5E1;
+      --gray-400: #94A3B8;
+      --gray-500: #64748B;
+      --gray-900: #0F172A;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--gray-100);
+      min-height: 100vh;
+    }
+    .container { display: flex; min-height: 100vh; }
+    .info-panel {
+      flex: 1; background: linear-gradient(135deg, #1E1B4B, #312E81);
+      color: #fff; padding: 4rem 3rem;
+      display: flex; flex-direction: column; justify-content: center;
+    }
+    .info-panel h1 { font-size: 2.5rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .info-panel .subtitle { font-size: 1.25rem; opacity: 0.8; margin-bottom: 2rem; }
+    .info-panel .description { line-height: 1.6; opacity: 0.9; margin-bottom: 2rem; }
+    .features { list-style: none; }
+    .features li {
+      padding: 0.5rem 0; padding-left: 1.5rem;
+      position: relative; opacity: 0.9;
+    }
+    .features li::before {
+      content: "\2713"; position: absolute; left: 0; color: #818CF8;
+    }
+    .action-panel {
+      flex: 1; display: flex; align-items: center;
+      justify-content: center; padding: 2rem;
+    }
+    .card {
+      background: #fff; border-radius: 1rem; padding: 2.5rem;
+      width: 100%; max-width: 440px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .upload-zone {
+      border: 2px dashed var(--gray-300); border-radius: 0.75rem;
+      padding: 3rem 2rem; text-align: center; cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .upload-zone:hover, .upload-zone.dragover {
+      border-color: var(--primary); background: #EEF2FF;
+    }
+    .upload-zone .icon { font-size: 2.5rem; margin-bottom: 1rem; color: var(--gray-400); }
+    .upload-zone p { color: var(--gray-500); margin-bottom: 0.25rem; }
+    .upload-zone .hint { font-size: 0.8rem; color: var(--gray-400); margin-top: 0.75rem; }
+    .link { color: var(--primary); cursor: pointer; text-decoration: underline; }
+    .btn {
+      display: block; width: 100%; padding: 0.875rem; border: none;
+      border-radius: 0.5rem; font-size: 1rem; font-weight: 600;
+      cursor: pointer; margin-top: 1.5rem; transition: background 0.2s;
+    }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-success:hover { background: #047857; }
+    .file-info {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 1rem; background: var(--gray-50); border-radius: 0.5rem;
+    }
+    .file-icon { font-size: 2rem; }
+    .file-info .details { flex: 1; min-width: 0; }
+    .file-name {
+      font-weight: 600; color: var(--gray-900);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .file-size { font-size: 0.85rem; color: var(--gray-500); }
+    .file-info .action { white-space: nowrap; font-size: 0.85rem; }
+    .progress-container {
+      height: 6px; background: var(--gray-200);
+      border-radius: 3px; overflow: hidden; margin-top: 1.5rem;
+    }
+    .progress-bar {
+      height: 100%; background: var(--primary);
+      border-radius: 3px; animation: slide 1.5s ease-in-out infinite;
+    }
+    @keyframes slide {
+      0% { width: 20%; margin-left: 0; }
+      50% { width: 40%; margin-left: 30%; }
+      100% { width: 20%; margin-left: 80%; }
+    }
+    .status-text {
+      text-align: center; color: var(--gray-500);
+      margin-top: 1rem; font-size: 0.9rem;
+    }
+    .result-icon {
+      width: 4rem; height: 4rem; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.5rem; font-weight: 700; margin: 0 auto 1rem;
+    }
+    .result-icon.success { background: var(--success-bg); color: var(--success); }
+    .result-icon.error { background: var(--error-bg); color: var(--error); }
+    .result-title {
+      text-align: center; font-size: 1.25rem;
+      font-weight: 600; color: var(--gray-900); margin-bottom: 0.5rem;
+    }
+    .result-detail {
+      text-align: center; color: var(--gray-500);
+      font-size: 0.9rem; margin-bottom: 1rem;
+    }
+    .error-box {
+      color: var(--error); font-size: 0.85rem;
+      padding: 0.75rem; background: var(--error-bg);
+      border-radius: 0.5rem; word-break: break-word; margin-bottom: 0.5rem;
+    }
+    .link-center {
+      display: block; text-align: center; margin-top: 1rem;
+      color: var(--primary); cursor: pointer;
+      text-decoration: underline; font-size: 0.9rem;
+    }
+    @media (max-width: 768px) {
+      .container { flex-direction: column; }
+      .info-panel { padding: 2rem 1.5rem; }
+      .info-panel h1 { font-size: 1.75rem; }
+      .action-panel { padding: 1.5rem; }
+      .card { padding: 1.5rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="info-panel">
+      <h1>PPT Restyle</h1>
+      <p class="subtitle">一键转换 PPT 样式</p>
+      <p class="description">上传你的 PPT 文件，自动应用精美模板样式。所有内容原样保留，仅替换背景和页面布局。</p>
+      <ul class="features">
+        <li>保留所有文字、图表、动画</li>
+        <li>自动适配模板布局和比例</li>
+        <li>浏览器端处理，文件不上传到服务器</li>
+        <li>支持 .pptx 格式，最大 50MB</li>
+      </ul>
+    </div>
+    <div class="action-panel">
+      <div class="card">
+        <div id="state-initial">
+          <div class="upload-zone" id="upload-zone">
+            <div class="icon">&#128193;</div>
+            <p>拖拽 PPT 文件到此处</p>
+            <p>或 <span class="link">点击选择文件</span></p>
+            <p class="hint">支持 .pptx 格式，最大 50MB</p>
+          </div>
+          <button class="btn btn-primary" disabled>开始转换</button>
+        </div>
+        <div id="state-selected" hidden>
+          <div class="file-info">
+            <span class="file-icon">&#128196;</span>
+            <div class="details">
+              <p class="file-name" id="file-name"></p>
+              <p class="file-size" id="file-size"></p>
+            </div>
+            <span class="action link" id="btn-reselect">重新选择</span>
+          </div>
+          <button class="btn btn-primary" id="btn-start">开始转换</button>
+        </div>
+        <div id="state-converting" hidden>
+          <div class="file-info">
+            <span class="file-icon">&#128196;</span>
+            <div class="details">
+              <p class="file-name" id="converting-name"></p>
+              <p class="file-size" id="converting-size"></p>
+            </div>
+          </div>
+          <div class="progress-container"><div class="progress-bar"></div></div>
+          <p class="status-text" id="status-text">正在加载转换引擎...</p>
+        </div>
+        <div id="state-complete" hidden>
+          <div class="result-icon success">&#10003;</div>
+          <p class="result-title">转换完成</p>
+          <p class="result-detail" id="output-name"></p>
+          <button class="btn btn-success" id="btn-download">下载文件</button>
+          <span class="link-center" id="btn-another">继续转换下一个</span>
+        </div>
+        <div id="state-error" hidden>
+          <div class="result-icon error">&#10005;</div>
+          <p class="result-title">转换失败</p>
+          <p class="error-box" id="error-message"></p>
+          <button class="btn btn-primary" id="btn-retry">重新选择文件</button>
+        </div>
+        <input type="file" id="file-input" accept=".pptx" hidden>
+      </div>
+    </div>
+  </div>
+  <script>
+    const $ = id => document.getElementById(id);
+    const STATES = ['initial', 'selected', 'converting', 'complete', 'error'];
+    let selectedFile = null;
+    let downloadUrl = null;
+    let pyodide = null;
+
+    // IMPORTANT: Full content of scripts/ppt_restyle.py inlined as a JS template literal.
+    // The Python source contains zero backticks and zero ${ sequences, so it's safe here.
+    const PPT_RESTYLE_SCRIPT = `
+import sys
+import os
+import shutil
+from copy import deepcopy
+from pathlib import Path
+
+from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.util import Emu
+
+NSMAP = {
+    'p': 'http://schemas.openxmlformats.org/presentationml/2006/main',
+    'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
+    'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+    'mc': 'http://schemas.openxmlformats.org/markup-compatibility/2006',
+}
+
+SHAPE_TAGS = {'sp', 'pic', 'graphicFrame', 'grpSp', 'cxnSp'}
+
+
+def _find_title_placeholder(slide):
+    for ph in slide.placeholders:
+        if ph.placeholder_format.idx == 0:
+            return ph
+    return None
+
+
+def _find_content_placeholder(slide):
+    for ph in slide.placeholders:
+        if ph.placeholder_format.idx == 1:
+            return ph
+    return None
+
+
+def _find_title_shape(slide):
+    ph = _find_title_placeholder(slide)
+    if ph:
+        return ph
+    for shape in slide.shapes:
+        if shape.has_text_frame and shape.name.lower().startswith('title'):
+            return shape
+    text_boxes = [
+        s for s in slide.shapes
+        if s.shape_type == MSO_SHAPE_TYPE.TEXT_BOX
+        and s.has_text_frame
+        and s.text_frame.text.strip()
+    ]
+    if text_boxes:
+        return min(text_boxes, key=lambda s: (s.top, s.left))
+    return None
+
+
+def validate_template(prs):
+    if len(prs.slides) != 2:
+        raise ValueError(f"模板必须恰好有 2 页幻灯片，当前有 {len(prs.slides)} 页")
+
+    cover = prs.slides[0]
+    if not _find_title_placeholder(cover):
+        raise ValueError("模板封面页（第1页）缺少标题占位符")
+
+    content = prs.slides[1]
+    if not _find_title_placeholder(content):
+        raise ValueError("模板内容页（第2页）缺少标题占位符")
+    if not _find_content_placeholder(content):
+        raise ValueError("模板内容页（第2页）缺少内容占位符")
+
+
+def _tag_local(element):
+    tag = element.tag
+    return tag.split('}')[-1] if '}' in tag else tag
+
+
+def _remap_rids(element, rId_map):
+    r_ns = NSMAP['r']
+    attrs = [f'{{{r_ns}}}{a}' for a in ('embed', 'link', 'id', 'dm', 'lo', 'qs', 'cs')]
+    for el in element.iter():
+        for attr in attrs:
+            val = el.get(attr)
+            if val and val in rId_map:
+                el.set(attr, rId_map[val])
+
+
+def _copy_background(src_slide, dst_slide):
+    src_cSld = src_slide._element.find('p:cSld', NSMAP)
+    dst_cSld = dst_slide._element.find('p:cSld', NSMAP)
+    if src_cSld is None or dst_cSld is None:
+        return
+    src_bg = src_cSld.find('p:bg', NSMAP)
+    if src_bg is not None:
+        dst_bg = dst_cSld.find('p:bg', NSMAP)
+        if dst_bg is not None:
+            dst_cSld.remove(dst_bg)
+        dst_cSld.insert(0, deepcopy(src_bg))
+
+
+def duplicate_slide(prs, slide_index):
+    src_slide = prs.slides[slide_index]
+    new_slide = prs.slides.add_slide(src_slide.slide_layout)
+
+    dst_spTree = new_slide.shapes._spTree
+
+    for child in list(dst_spTree):
+        if _tag_local(child) in SHAPE_TAGS:
+            dst_spTree.remove(child)
+
+    rId_map = {}
+    for rId, rel in src_slide.part.rels.items():
+        if not rel.is_external:
+            new_rId = new_slide.part.relate_to(rel.target_part, rel.reltype)
+            rId_map[rId] = new_rId
+
+    for child in src_slide.shapes._spTree:
+        if _tag_local(child) in SHAPE_TAGS:
+            new_child = deepcopy(child)
+            _remap_rids(new_child, rId_map)
+            dst_spTree.append(new_child)
+
+    _copy_background(src_slide, new_slide)
+    return new_slide
+
+
+def remove_slide(prs, slide_index):
+    rId_lst = prs.slides._sldIdLst
+    sldId = rId_lst[slide_index]
+    rId = sldId.get(f'{{{NSMAP["r"]}}}id')
+    prs.part.drop_rel(rId)
+    rId_lst.remove(sldId)
+
+
+def get_title_text(slide):
+    shape = _find_title_shape(slide)
+    if shape and shape.has_text_frame:
+        return shape.text_frame.text
+    return ""
+
+
+def set_title_text(slide, text):
+    ph = _find_title_placeholder(slide)
+    if not ph or not ph.has_text_frame:
+        return
+    tf = ph.text_frame
+    if tf.paragraphs:
+        para = tf.paragraphs[0]
+        if para.runs:
+            para.runs[0].text = text
+            for run in para.runs[1:]:
+                run._r.getparent().remove(run._r)
+        else:
+            para.text = text
+        for p in tf.paragraphs[1:]:
+            p._p.getparent().remove(p._p)
+    else:
+        tf.text = text
+
+
+def get_content_shapes(slide):
+    title_shape = _find_title_shape(slide)
+    title_el = title_shape._element if title_shape else None
+    header_bottom = (title_shape.top + title_shape.height + Emu(150000)) if title_shape else 0
+
+    content = []
+    for shape in slide.shapes:
+        if shape._element is title_el:
+            continue
+        if shape.top < 0:
+            continue
+        if header_bottom and (shape.top + shape.height) <= header_bottom:
+            continue
+        try:
+            ph_fmt = shape.placeholder_format
+        except ValueError:
+            ph_fmt = None
+        if ph_fmt is not None:
+            if ph_fmt.idx in (0, 10, 11, 12):
+                continue
+        content.append(shape)
+    return content
+
+
+def compute_bounding_box(shapes):
+    if not shapes:
+        return None
+    left = min(s.left for s in shapes)
+    top = min(s.top for s in shapes)
+    right = max(s.left + s.width for s in shapes)
+    bottom = max(s.top + s.height for s in shapes)
+    return (left, top, right, bottom)
+
+
+def compute_mapping(src_bounds, dst_bounds):
+    src_left, src_top, src_right, src_bottom = src_bounds
+    dst_left, dst_top, dst_right, dst_bottom = dst_bounds
+
+    src_w = src_right - src_left
+    src_h = src_bottom - src_top
+    dst_w = dst_right - dst_left
+    dst_h = dst_bottom - dst_top
+
+    if src_w == 0 or src_h == 0:
+        return (1.0, dst_left, dst_top, src_left, src_top)
+
+    scale = min(dst_w / src_w, dst_h / src_h)
+    return (scale, dst_left, dst_top, src_left, src_top)
+
+
+def map_position(left, top, width, height, mapping):
+    scale, dst_left, dst_top, src_left, src_top = mapping
+    new_left = int((left - src_left) * scale + dst_left)
+    new_top = int((top - src_top) * scale + dst_top)
+    new_width = int(width * scale)
+    new_height = int(height * scale)
+    return (new_left, new_top, new_width, new_height)
+
+
+def get_content_area_bounds(slide):
+    ph = _find_content_placeholder(slide)
+    if ph:
+        return (ph.left, ph.top, ph.left + ph.width, ph.top + ph.height)
+    raise ValueError("无法确定内容区域边界")
+
+
+def _get_mc_elements(slide, header_bottom):
+    spTree = slide._element.find('p:cSld/p:spTree', NSMAP)
+    if spTree is None:
+        return []
+    p_ns = NSMAP['p']
+    results = []
+    for mc in spTree.findall('mc:AlternateContent', NSMAP):
+        choice = mc.find('mc:Choice', NSMAP)
+        if choice is None:
+            continue
+        shape_el = None
+        for tag_local in SHAPE_TAGS:
+            shape_el = choice.find(f'{{{p_ns}}}{tag_local}')
+            if shape_el is not None:
+                break
+        if shape_el is None:
+            continue
+        xfrm = shape_el.find('.//a:xfrm', NSMAP)
+        if xfrm is None:
+            xfrm = shape_el.find('p:xfrm', NSMAP)
+        if xfrm is None:
+            continue
+        off = xfrm.find('a:off', NSMAP)
+        ext = xfrm.find('a:ext', NSMAP)
+        if off is None or ext is None:
+            continue
+        left = int(off.get('x', 0))
+        top = int(off.get('y', 0))
+        width = int(ext.get('cx', 0))
+        height = int(ext.get('cy', 0))
+        if top < 0:
+            continue
+        if header_bottom and (top + height) <= header_bottom:
+            continue
+        results.append((mc, left, top, width, height))
+    return results
+
+
+def _migrate_mc_element(dst_slide, mc_el, left, top, width, height, mapping, src_slide):
+    new_mc = deepcopy(mc_el)
+    new_left, new_top, new_width, new_height = map_position(
+        left, top, width, height, mapping
+    )
+    for xfrm in new_mc.iter(f'{{{NSMAP["a"]}}}xfrm'):
+        off = xfrm.find('a:off', NSMAP)
+        if off is not None:
+            off.set('x', str(new_left))
+            off.set('y', str(new_top))
+        ext = xfrm.find('a:ext', NSMAP)
+        if ext is not None:
+            ext.set('cx', str(new_width))
+            ext.set('cy', str(new_height))
+
+    r_ns = NSMAP['r']
+    r_attrs = [f'{{{r_ns}}}{a}' for a in ('embed', 'link', 'id', 'dm', 'lo', 'qs', 'cs')]
+    rId_map = {}
+    for el in new_mc.iter():
+        for attr in r_attrs:
+            val = el.get(attr)
+            if val and val not in rId_map and val in src_slide.part.rels:
+                rel = src_slide.part.rels[val]
+                if rel.is_external:
+                    new_rId = dst_slide.part.relate_to(rel.target_ref, rel.reltype, is_external=True)
+                else:
+                    new_rId = dst_slide.part.relate_to(rel.target_part, rel.reltype)
+                rId_map[val] = new_rId
+    if rId_map:
+        _remap_rids(new_mc, rId_map)
+
+    dst_slide.shapes._spTree.append(new_mc)
+
+
+def migrate_content(dst_slide, src_slide, dst_bounds):
+    content_shapes = get_content_shapes(src_slide)
+    title_shape = _find_title_shape(src_slide)
+    header_bottom = (title_shape.top + title_shape.height + Emu(150000)) if title_shape else 0
+    mc_elements = _get_mc_elements(src_slide, header_bottom)
+
+    if not content_shapes and not mc_elements:
+        return
+
+    content_ph = _find_content_placeholder(dst_slide)
+    if content_ph:
+        content_ph._element.getparent().remove(content_ph._element)
+
+    src_bounds = compute_bounding_box(content_shapes)
+    for _, ml, mt, mw, mh in mc_elements:
+        mc_right, mc_bottom = ml + mw, mt + mh
+        if src_bounds is None:
+            src_bounds = (ml, mt, mc_right, mc_bottom)
+        else:
+            src_bounds = (
+                min(src_bounds[0], ml), min(src_bounds[1], mt),
+                max(src_bounds[2], mc_right), max(src_bounds[3], mc_bottom),
+            )
+    if src_bounds is None:
+        return
+
+    mapping = compute_mapping(src_bounds, dst_bounds)
+
+    for shape in content_shapes:
+        _migrate_single_shape(dst_slide, shape, mapping, src_slide)
+
+    for mc_el, ml, mt, mw, mh in mc_elements:
+        _migrate_mc_element(dst_slide, mc_el, ml, mt, mw, mh, mapping, src_slide)
+
+
+def _migrate_single_shape(dst_slide, shape, mapping, src_slide):
+    if hasattr(shape, 'has_chart') and shape.has_chart:
+        _migrate_chart(dst_slide, shape, mapping, src_slide)
+    else:
+        _migrate_generic_shape(dst_slide, shape, mapping, src_slide)
+
+
+def _migrate_generic_shape(dst_slide, shape, mapping, src_slide):
+    new_el = deepcopy(shape._element)
+    new_left, new_top, new_width, new_height = map_position(
+        shape.left, shape.top, shape.width, shape.height, mapping
+    )
+    xfrm = new_el.find('.//a:xfrm', NSMAP)
+    if xfrm is None:
+        xfrm = new_el.find('p:xfrm', NSMAP)
+    if xfrm is not None:
+        off = xfrm.find('a:off', NSMAP)
+        if off is not None:
+            off.set('x', str(new_left))
+            off.set('y', str(new_top))
+        ext = xfrm.find('a:ext', NSMAP)
+        if ext is not None:
+            ext.set('cx', str(new_width))
+            ext.set('cy', str(new_height))
+
+    r_ns = NSMAP['r']
+    r_attrs = [f'{{{r_ns}}}{a}' for a in ('embed', 'link', 'id', 'dm', 'lo', 'qs', 'cs')]
+    rId_map = {}
+    for el in new_el.iter():
+        for attr in r_attrs:
+            val = el.get(attr)
+            if val and val not in rId_map and val in src_slide.part.rels:
+                rel = src_slide.part.rels[val]
+                if rel.is_external:
+                    new_rId = dst_slide.part.relate_to(rel.target_ref, rel.reltype, is_external=True)
+                else:
+                    new_rId = dst_slide.part.relate_to(rel.target_part, rel.reltype)
+                rId_map[val] = new_rId
+    if rId_map:
+        _remap_rids(new_el, rId_map)
+
+    dst_slide.shapes._spTree.append(new_el)
+
+
+def _migrate_chart(dst_slide, shape, mapping, src_slide):
+    new_el = deepcopy(shape._element)
+    new_left, new_top, new_width, new_height = map_position(
+        shape.left, shape.top, shape.width, shape.height, mapping
+    )
+    xfrm = new_el.find('.//a:xfrm', NSMAP)
+    if xfrm is not None:
+        off = xfrm.find('a:off', NSMAP)
+        if off is not None:
+            off.set('x', str(new_left))
+            off.set('y', str(new_top))
+        ext = xfrm.find('a:ext', NSMAP)
+        if ext is not None:
+            ext.set('cx', str(new_width))
+            ext.set('cy', str(new_height))
+
+    chart_ns = 'http://schemas.openxmlformats.org/drawingml/2006/chart'
+    chart_ref = new_el.find(f'.//{{{chart_ns}}}chart')
+    if chart_ref is not None:
+        old_rId = chart_ref.get(f'{{{NSMAP["r"]}}}id')
+        if old_rId and old_rId in src_slide.part.rels:
+            rel = src_slide.part.rels[old_rId]
+            new_rId = dst_slide.part.relate_to(rel.target_part, rel.reltype)
+            chart_ref.set(f'{{{NSMAP["r"]}}}id', new_rId)
+
+    dst_slide.shapes._spTree.append(new_el)
+
+
+def _get_all_shape_ids(slide):
+    spids = set()
+    for shape in slide.shapes:
+        spids.add(str(shape.shape_id))
+    spTree = slide._element.find('p:cSld/p:spTree', NSMAP)
+    if spTree is not None:
+        p_ns = NSMAP['p']
+        for mc in spTree.findall('mc:AlternateContent', NSMAP):
+            choice = mc.find('mc:Choice', NSMAP)
+            if choice is None:
+                continue
+            for tag_local in SHAPE_TAGS:
+                el = choice.find(f'{{{p_ns}}}{tag_local}')
+                if el is not None:
+                    for cNvPr in el.iter(f'{{{p_ns}}}cNvPr'):
+                        sid = cNvPr.get('id')
+                        if sid:
+                            spids.add(sid)
+                        break
+    return spids
+
+
+def _filter_orphaned_animations(timing_el, valid_spids):
+    p_ns = NSMAP['p']
+    for seq in timing_el.iter(f'{{{p_ns}}}seq'):
+        seq_cTn = seq.find(f'{{{p_ns}}}cTn')
+        if seq_cTn is None:
+            continue
+        childTnLst = seq_cTn.find(f'{{{p_ns}}}childTnLst')
+        if childTnLst is None:
+            continue
+        for click_par in list(childTnLst):
+            click_cTn = click_par.find(f'{{{p_ns}}}cTn')
+            if click_cTn is None:
+                continue
+            inner_list = click_cTn.find(f'{{{p_ns}}}childTnLst')
+            if inner_list is None:
+                continue
+            for anim_par in list(inner_list):
+                targets = anim_par.findall(f'.//{{{p_ns}}}spTgt')
+                if targets and any(t.get('spid') not in valid_spids for t in targets):
+                    inner_list.remove(anim_par)
+            if len(inner_list) == 0:
+                childTnLst.remove(click_par)
+
+
+def _copy_slide_animations(src_slide, dst_slide):
+    src_el = src_slide._element
+    dst_el = dst_slide._element
+
+    dst_spids = _get_all_shape_ids(dst_slide)
+
+    for tag in ('p:transition', 'p:timing'):
+        src_node = src_el.find(tag, NSMAP)
+        if src_node is None:
+            continue
+        new_node = deepcopy(src_node)
+
+        r_ns = NSMAP['r']
+        r_attrs = [f'{{{r_ns}}}{a}' for a in ('embed', 'link', 'id')]
+        rId_map = {}
+        for el in new_node.iter():
+            for attr in r_attrs:
+                val = el.get(attr)
+                if val and val not in rId_map and val in src_slide.part.rels:
+                    rel = src_slide.part.rels[val]
+                    if rel.is_external:
+                        new_rId = dst_slide.part.relate_to(
+                            rel.target_ref, rel.reltype, is_external=True)
+                    else:
+                        new_rId = dst_slide.part.relate_to(
+                            rel.target_part, rel.reltype)
+                    rId_map[val] = new_rId
+        if rId_map:
+            _remap_rids(new_node, rId_map)
+
+        if tag == 'p:timing':
+            _filter_orphaned_animations(new_node, dst_spids)
+
+        dst_node = dst_el.find(tag, NSMAP)
+        if dst_node is not None:
+            dst_el.remove(dst_node)
+        dst_el.append(new_node)
+
+
+def restyle(source_path, template_path, output_path):
+    if not os.path.exists(source_path):
+        raise FileNotFoundError(f"源文件不存在: {source_path}")
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(f"模板文件不存在: {template_path}")
+
+    os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+
+    template_prs = Presentation(template_path)
+    validate_template(template_prs)
+    content_bounds = get_content_area_bounds(template_prs.slides[1])
+
+    src_prs = Presentation(source_path)
+    if len(src_prs.slides) == 0:
+        raise ValueError("源 PPT 没有任何幻灯片")
+
+    shutil.copy2(template_path, output_path)
+    prs = Presentation(output_path)
+
+    cover_title = get_title_text(src_prs.slides[0])
+    set_title_text(prs.slides[0], cover_title)
+    _copy_slide_animations(src_prs.slides[0], prs.slides[0])
+
+    template_slide_index = 1
+    has_content_slides = False
+
+    for i in range(1, len(src_prs.slides)):
+        src_slide = src_prs.slides[i]
+        title = get_title_text(src_slide)
+        shapes = get_content_shapes(src_slide)
+
+        if not shapes and not title:
+            continue
+
+        has_content_slides = True
+        new_slide = duplicate_slide(prs, template_slide_index)
+        set_title_text(new_slide, title)
+        migrate_content(new_slide, src_slide, content_bounds)
+        _copy_slide_animations(src_slide, new_slide)
+
+    remove_slide(prs, template_slide_index)
+
+    if not has_content_slides and len(src_prs.slides) == 1:
+        pass  # 仅保留封面
+
+    prs.save(output_path)
+    return output_path
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("用法: python ppt_restyle.py <源PPT路径> [模板路径] [输出路径]")
+        sys.exit(1)
+
+    source = sys.argv[1]
+    base_dir = Path(__file__).parent.parent
+
+    template = (
+        sys.argv[2] if len(sys.argv) > 2
+        else str(base_dir / 'templates' / 'template.pptx')
+    )
+
+    if len(sys.argv) > 3:
+        output = sys.argv[3]
+    else:
+        source_name = Path(source).stem
+        output = str(base_dir / 'output' / f'{source_name}_styled.pptx')
+
+    try:
+        result = restyle(source, template, output)
+        print(f"转换完成: {result}")
+    except Exception as e:
+        print(f"转换失败: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()
+`;
+
+    function setState(name) {
+      STATES.forEach(s => $('state-' + s).hidden = (s !== name));
+    }
+
+    function formatSize(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / 1048576).toFixed(1) + ' MB';
+    }
+
+    function handleFile(file) {
+      if (!file) return;
+      if (!file.name.toLowerCase().endsWith('.pptx')) {
+        return alert('请选择 .pptx 格式的文件');
+      }
+      if (file.size > 50 * 1024 * 1024) {
+        return alert('文件大小不能超过 50MB');
+      }
+      selectedFile = file;
+      $('file-name').textContent = file.name;
+      $('file-size').textContent = formatSize(file.size);
+      setState('selected');
+    }
+
+    function resetToInitial() {
+      $('file-input').value = '';
+      selectedFile = null;
+      if (downloadUrl) { URL.revokeObjectURL(downloadUrl); downloadUrl = null; }
+      setState('initial');
+    }
+
+    // Upload zone interactions
+    const zone = $('upload-zone');
+    zone.addEventListener('click', () => $('file-input').click());
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+    zone.addEventListener('dragleave', e => { if (!zone.contains(e.relatedTarget)) zone.classList.remove('dragover'); });
+    zone.addEventListener('drop', e => {
+      e.preventDefault(); zone.classList.remove('dragover');
+      handleFile(e.dataTransfer.files[0]);
+    });
+    $('file-input').addEventListener('change', e => handleFile(e.target.files[0]));
+
+    // Button handlers
+    $('btn-reselect').addEventListener('click', resetToInitial);
+    $('btn-retry').addEventListener('click', resetToInitial);
+    $('btn-another').addEventListener('click', resetToInitial);
+    $('btn-start').addEventListener('click', startConversion);
+
+    // Pyodide engine loading — on-demand from CDN
+    async function loadPyodideEngine() {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js';
+        script.onload = async () => {
+          try { resolve(await loadPyodide()); }
+          catch (e) { reject(e); }
+        };
+        script.onerror = () => reject(new Error('Pyodide 加载失败，请检查网络连接'));
+        document.head.appendChild(script);
+      });
+    }
+
+    // One-time setup with Promise-based singleton (prevents race on double-click)
+    let enginePromise = null;
+    async function ensureEngine() {
+      if (!enginePromise) {
+        enginePromise = _initEngine().catch(e => { enginePromise = null; throw e; });
+      }
+      return enginePromise;
+    }
+
+    async function _initEngine() {
+      $('status-text').textContent = '正在加载转换引擎...';
+      pyodide = await loadPyodideEngine();
+
+      $('status-text').textContent = '正在安装依赖...';
+      await pyodide.loadPackage('micropip');
+      await pyodide.runPythonAsync(`
+import micropip
+await micropip.install('python-pptx')
+      `);
+
+      pyodide.FS.writeFile('ppt_restyle.py', PPT_RESTYLE_SCRIPT);
+
+      // Cache template in virtual FS (18MB, fetch once)
+      const templateResp = await fetch('template.pptx');
+      if (!templateResp.ok) throw new Error('模板文件加载失败，请刷新重试');
+      pyodide.FS.writeFile('/tmp/template.pptx', new Uint8Array(await templateResp.arrayBuffer()));
+    }
+
+    async function startConversion() {
+      $('converting-name').textContent = selectedFile.name;
+      $('converting-size').textContent = formatSize(selectedFile.size);
+      setState('converting');
+
+      try {
+        await ensureEngine();
+
+        $('status-text').textContent = '正在转换 PPT...';
+
+        // Write source file to virtual FS
+        const sourceBuffer = await selectedFile.arrayBuffer();
+        pyodide.FS.writeFile('/tmp/source.pptx', new Uint8Array(sourceBuffer));
+
+        // Run conversion
+        await pyodide.runPythonAsync(`
+from ppt_restyle import restyle
+restyle('/tmp/source.pptx', '/tmp/template.pptx', '/tmp/output.pptx')
+        `);
+
+        // Read output and create download blob
+        const outputData = pyodide.FS.readFile('/tmp/output.pptx');
+        const blob = new Blob([outputData], {
+          type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        });
+
+        // Clean up temp files to free memory
+        pyodide.FS.unlink('/tmp/source.pptx');
+        pyodide.FS.unlink('/tmp/output.pptx');
+
+        if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+        downloadUrl = URL.createObjectURL(blob);
+
+        const outputName = selectedFile.name.replace(/\.pptx$/i, '_styled.pptx');
+        $('output-name').textContent = outputName;
+        $('btn-download').onclick = () => {
+          const a = document.createElement('a');
+          a.href = downloadUrl;
+          a.download = outputName;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        };
+
+        setState('complete');
+      } catch (err) {
+        let msg = err.message || String(err);
+        if (msg.includes('FileNotFoundError')) msg = '文件读取失败，请重试';
+        else if (msg.includes('ValueError') && msg.includes('模板'))
+          msg = '模板文件损坏，请刷新页面重试';
+        $('error-message').textContent = msg;
+        setState('error');
+      }
+    }
+  </script>
+</body>
+</html>
