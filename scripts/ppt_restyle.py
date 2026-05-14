@@ -2,12 +2,11 @@ import sys
 import os
 import shutil
 from copy import deepcopy
-from io import BytesIO
 from pathlib import Path
 
 from pptx import Presentation
-from pptx.util import Emu
 from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.util import Emu
 
 NSMAP = {
     'p': 'http://schemas.openxmlformats.org/presentationml/2006/main',
@@ -328,22 +327,10 @@ def migrate_content(dst_slide, src_slide, dst_bounds):
 
 
 def _migrate_single_shape(dst_slide, shape, mapping, src_slide):
-    if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
-        _migrate_picture(dst_slide, shape, mapping)
-    elif hasattr(shape, 'has_chart') and shape.has_chart:
+    if hasattr(shape, 'has_chart') and shape.has_chart:
         _migrate_chart(dst_slide, shape, mapping, src_slide)
     else:
         _migrate_generic_shape(dst_slide, shape, mapping, src_slide)
-
-
-def _migrate_picture(dst_slide, shape, mapping):
-    new_left, new_top, new_width, new_height = map_position(
-        shape.left, shape.top, shape.width, shape.height, mapping
-    )
-    image_stream = BytesIO(shape.image.blob)
-    dst_slide.shapes.add_picture(
-        image_stream, new_left, new_top, new_width, new_height
-    )
 
 
 def _migrate_generic_shape(dst_slide, shape, mapping, src_slide):
@@ -411,6 +398,91 @@ def _migrate_chart(dst_slide, shape, mapping, src_slide):
     dst_slide.shapes._spTree.append(new_el)
 
 
+def _get_all_shape_ids(slide):
+    spids = set()
+    for shape in slide.shapes:
+        spids.add(str(shape.shape_id))
+    spTree = slide._element.find('p:cSld/p:spTree', NSMAP)
+    if spTree is not None:
+        p_ns = NSMAP['p']
+        for mc in spTree.findall('mc:AlternateContent', NSMAP):
+            choice = mc.find('mc:Choice', NSMAP)
+            if choice is None:
+                continue
+            for tag_local in SHAPE_TAGS:
+                el = choice.find(f'{{{p_ns}}}{tag_local}')
+                if el is not None:
+                    for cNvPr in el.iter(f'{{{p_ns}}}cNvPr'):
+                        sid = cNvPr.get('id')
+                        if sid:
+                            spids.add(sid)
+                        break
+    return spids
+
+
+def _filter_orphaned_animations(timing_el, valid_spids):
+    p_ns = NSMAP['p']
+    for seq in timing_el.iter(f'{{{p_ns}}}seq'):
+        seq_cTn = seq.find(f'{{{p_ns}}}cTn')
+        if seq_cTn is None:
+            continue
+        childTnLst = seq_cTn.find(f'{{{p_ns}}}childTnLst')
+        if childTnLst is None:
+            continue
+        for click_par in list(childTnLst):
+            click_cTn = click_par.find(f'{{{p_ns}}}cTn')
+            if click_cTn is None:
+                continue
+            inner_list = click_cTn.find(f'{{{p_ns}}}childTnLst')
+            if inner_list is None:
+                continue
+            for anim_par in list(inner_list):
+                targets = anim_par.findall(f'.//{{{p_ns}}}spTgt')
+                if targets and any(t.get('spid') not in valid_spids for t in targets):
+                    inner_list.remove(anim_par)
+            if len(inner_list) == 0:
+                childTnLst.remove(click_par)
+
+
+def _copy_slide_animations(src_slide, dst_slide):
+    src_el = src_slide._element
+    dst_el = dst_slide._element
+
+    dst_spids = _get_all_shape_ids(dst_slide)
+
+    for tag in ('p:transition', 'p:timing'):
+        src_node = src_el.find(tag, NSMAP)
+        if src_node is None:
+            continue
+        new_node = deepcopy(src_node)
+
+        r_ns = NSMAP['r']
+        r_attrs = [f'{{{r_ns}}}{a}' for a in ('embed', 'link', 'id')]
+        rId_map = {}
+        for el in new_node.iter():
+            for attr in r_attrs:
+                val = el.get(attr)
+                if val and val not in rId_map and val in src_slide.part.rels:
+                    rel = src_slide.part.rels[val]
+                    if rel.is_external:
+                        new_rId = dst_slide.part.relate_to(
+                            rel.target_ref, rel.reltype, is_external=True)
+                    else:
+                        new_rId = dst_slide.part.relate_to(
+                            rel.target_part, rel.reltype)
+                    rId_map[val] = new_rId
+        if rId_map:
+            _remap_rids(new_node, rId_map)
+
+        if tag == 'p:timing':
+            _filter_orphaned_animations(new_node, dst_spids)
+
+        dst_node = dst_el.find(tag, NSMAP)
+        if dst_node is not None:
+            dst_el.remove(dst_node)
+        dst_el.append(new_node)
+
+
 def restyle(source_path, template_path, output_path):
     if not os.path.exists(source_path):
         raise FileNotFoundError(f"源文件不存在: {source_path}")
@@ -432,6 +504,7 @@ def restyle(source_path, template_path, output_path):
 
     cover_title = get_title_text(src_prs.slides[0])
     set_title_text(prs.slides[0], cover_title)
+    _copy_slide_animations(src_prs.slides[0], prs.slides[0])
 
     template_slide_index = 1
     has_content_slides = False
@@ -448,6 +521,7 @@ def restyle(source_path, template_path, output_path):
         new_slide = duplicate_slide(prs, template_slide_index)
         set_title_text(new_slide, title)
         migrate_content(new_slide, src_slide, content_bounds)
+        _copy_slide_animations(src_slide, new_slide)
 
     remove_slide(prs, template_slide_index)
 
