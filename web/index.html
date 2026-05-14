@@ -205,7 +205,6 @@
     let selectedFile = null;
     let downloadUrl = null;
     let pyodide = null;
-    let engineReady = false;
 
     // IMPORTANT: Full content of scripts/ppt_restyle.py inlined as a JS template literal.
     // The Python source contains zero backticks and zero ${ sequences, so it's safe here.
@@ -837,10 +836,16 @@ if __name__ == '__main__':
       });
     }
 
-    // One-time setup: load Pyodide + install python-pptx + write script file
+    // One-time setup with Promise-based singleton (prevents race on double-click)
+    let enginePromise = null;
     async function ensureEngine() {
-      if (engineReady) return;
+      if (!enginePromise) {
+        enginePromise = _initEngine().catch(e => { enginePromise = null; throw e; });
+      }
+      return enginePromise;
+    }
 
+    async function _initEngine() {
       $('status-text').textContent = '正在加载转换引擎...';
       pyodide = await loadPyodideEngine();
 
@@ -852,7 +857,11 @@ await micropip.install('python-pptx')
       `);
 
       pyodide.FS.writeFile('ppt_restyle.py', PPT_RESTYLE_SCRIPT);
-      engineReady = true;
+
+      // Cache template in virtual FS (18MB, fetch once)
+      const templateResp = await fetch('template.pptx');
+      if (!templateResp.ok) throw new Error('模板文件加载失败，请刷新重试');
+      pyodide.FS.writeFile('/tmp/template.pptx', new Uint8Array(await templateResp.arrayBuffer()));
     }
 
     async function startConversion() {
@@ -869,12 +878,6 @@ await micropip.install('python-pptx')
         const sourceBuffer = await selectedFile.arrayBuffer();
         pyodide.FS.writeFile('/tmp/source.pptx', new Uint8Array(sourceBuffer));
 
-        // Fetch and write template to virtual FS
-        const templateResp = await fetch('template.pptx');
-        if (!templateResp.ok) throw new Error('模板文件加载失败，请刷新重试');
-        const templateBuffer = await templateResp.arrayBuffer();
-        pyodide.FS.writeFile('/tmp/template.pptx', new Uint8Array(templateBuffer));
-
         // Run conversion
         await pyodide.runPythonAsync(`
 from ppt_restyle import restyle
@@ -886,6 +889,10 @@ restyle('/tmp/source.pptx', '/tmp/template.pptx', '/tmp/output.pptx')
         const blob = new Blob([outputData], {
           type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
         });
+
+        // Clean up temp files to free memory
+        pyodide.FS.unlink('/tmp/source.pptx');
+        pyodide.FS.unlink('/tmp/output.pptx');
 
         if (downloadUrl) URL.revokeObjectURL(downloadUrl);
         downloadUrl = URL.createObjectURL(blob);
