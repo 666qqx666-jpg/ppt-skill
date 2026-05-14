@@ -13,6 +13,7 @@ NSMAP = {
     'p': 'http://schemas.openxmlformats.org/presentationml/2006/main',
     'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
     'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+    'mc': 'http://schemas.openxmlformats.org/markup-compatibility/2006',
 }
 
 SHAPE_TAGS = {'sp', 'pic', 'graphicFrame', 'grpSp', 'cxnSp'}
@@ -29,6 +30,24 @@ def _find_content_placeholder(slide):
     for ph in slide.placeholders:
         if ph.placeholder_format.idx == 1:
             return ph
+    return None
+
+
+def _find_title_shape(slide):
+    ph = _find_title_placeholder(slide)
+    if ph:
+        return ph
+    for shape in slide.shapes:
+        if shape.has_text_frame and shape.name.lower().startswith('title'):
+            return shape
+    text_boxes = [
+        s for s in slide.shapes
+        if s.shape_type == MSO_SHAPE_TYPE.TEXT_BOX
+        and s.has_text_frame
+        and s.text_frame.text.strip()
+    ]
+    if text_boxes:
+        return min(text_boxes, key=lambda s: (s.top, s.left))
     return None
 
 
@@ -54,7 +73,7 @@ def _tag_local(element):
 
 def _remap_rids(element, rId_map):
     r_ns = NSMAP['r']
-    attrs = [f'{{{r_ns}}}embed', f'{{{r_ns}}}link', f'{{{r_ns}}}id']
+    attrs = [f'{{{r_ns}}}{a}' for a in ('embed', 'link', 'id', 'dm', 'lo', 'qs', 'cs')]
     for el in element.iter():
         for attr in attrs:
             val = el.get(attr)
@@ -110,12 +129,9 @@ def remove_slide(prs, slide_index):
 
 
 def get_title_text(slide):
-    ph = _find_title_placeholder(slide)
-    if ph and ph.has_text_frame:
-        return ph.text_frame.text
-    for shape in slide.shapes:
-        if shape.has_text_frame and shape.name.lower().startswith('title'):
-            return shape.text_frame.text
+    shape = _find_title_shape(slide)
+    if shape and shape.has_text_frame:
+        return shape.text_frame.text
     return ""
 
 
@@ -139,12 +155,17 @@ def set_title_text(slide, text):
 
 
 def get_content_shapes(slide):
-    title_ph = _find_title_placeholder(slide)
-    title_el = title_ph._element if title_ph else None
+    title_shape = _find_title_shape(slide)
+    title_el = title_shape._element if title_shape else None
+    header_bottom = (title_shape.top + title_shape.height + Emu(150000)) if title_shape else 0
 
     content = []
     for shape in slide.shapes:
         if shape._element is title_el:
+            continue
+        if shape.top < 0:
+            continue
+        if header_bottom and (shape.top + shape.height) <= header_bottom:
             continue
         try:
             ph_fmt = shape.placeholder_format
@@ -199,9 +220,85 @@ def get_content_area_bounds(slide):
     raise ValueError("无法确定内容区域边界")
 
 
+def _get_mc_elements(slide, header_bottom):
+    spTree = slide._element.find('p:cSld/p:spTree', NSMAP)
+    if spTree is None:
+        return []
+    p_ns = NSMAP['p']
+    results = []
+    for mc in spTree.findall('mc:AlternateContent', NSMAP):
+        choice = mc.find('mc:Choice', NSMAP)
+        if choice is None:
+            continue
+        shape_el = None
+        for tag_local in SHAPE_TAGS:
+            shape_el = choice.find(f'{{{p_ns}}}{tag_local}')
+            if shape_el is not None:
+                break
+        if shape_el is None:
+            continue
+        xfrm = shape_el.find('.//a:xfrm', NSMAP)
+        if xfrm is None:
+            xfrm = shape_el.find('p:xfrm', NSMAP)
+        if xfrm is None:
+            continue
+        off = xfrm.find('a:off', NSMAP)
+        ext = xfrm.find('a:ext', NSMAP)
+        if off is None or ext is None:
+            continue
+        left = int(off.get('x', 0))
+        top = int(off.get('y', 0))
+        width = int(ext.get('cx', 0))
+        height = int(ext.get('cy', 0))
+        if top < 0:
+            continue
+        if header_bottom and (top + height) <= header_bottom:
+            continue
+        results.append((mc, left, top, width, height))
+    return results
+
+
+def _migrate_mc_element(dst_slide, mc_el, left, top, width, height, mapping, src_slide):
+    new_mc = deepcopy(mc_el)
+    new_left, new_top, new_width, new_height = map_position(
+        left, top, width, height, mapping
+    )
+    for xfrm in new_mc.iter(f'{{{NSMAP["a"]}}}xfrm'):
+        off = xfrm.find('a:off', NSMAP)
+        if off is not None:
+            off.set('x', str(new_left))
+            off.set('y', str(new_top))
+        ext = xfrm.find('a:ext', NSMAP)
+        if ext is not None:
+            ext.set('cx', str(new_width))
+            ext.set('cy', str(new_height))
+
+    r_ns = NSMAP['r']
+    r_attrs = [f'{{{r_ns}}}{a}' for a in ('embed', 'link', 'id', 'dm', 'lo', 'qs', 'cs')]
+    rId_map = {}
+    for el in new_mc.iter():
+        for attr in r_attrs:
+            val = el.get(attr)
+            if val and val not in rId_map and val in src_slide.part.rels:
+                rel = src_slide.part.rels[val]
+                if rel.is_external:
+                    new_rId = dst_slide.part.relate_to(rel.target_ref, rel.reltype, is_external=True)
+                else:
+                    new_rId = dst_slide.part.relate_to(rel.target_part, rel.reltype)
+                rId_map[val] = new_rId
+    if rId_map:
+        _remap_rids(new_mc, rId_map)
+
+    dst_slide.shapes._spTree.append(new_mc)
+
+
 def migrate_content(dst_slide, src_slide, dst_bounds):
     content_shapes = get_content_shapes(src_slide)
-    if not content_shapes:
+    title_shape = _find_title_shape(src_slide)
+    header_bottom = (title_shape.top + title_shape.height + Emu(150000)) if title_shape else 0
+    mc_elements = _get_mc_elements(src_slide, header_bottom)
+
+    if not content_shapes and not mc_elements:
         return
 
     content_ph = _find_content_placeholder(dst_slide)
@@ -209,6 +306,15 @@ def migrate_content(dst_slide, src_slide, dst_bounds):
         content_ph._element.getparent().remove(content_ph._element)
 
     src_bounds = compute_bounding_box(content_shapes)
+    for _, ml, mt, mw, mh in mc_elements:
+        mc_right, mc_bottom = ml + mw, mt + mh
+        if src_bounds is None:
+            src_bounds = (ml, mt, mc_right, mc_bottom)
+        else:
+            src_bounds = (
+                min(src_bounds[0], ml), min(src_bounds[1], mt),
+                max(src_bounds[2], mc_right), max(src_bounds[3], mc_bottom),
+            )
     if src_bounds is None:
         return
 
@@ -217,6 +323,9 @@ def migrate_content(dst_slide, src_slide, dst_bounds):
     for shape in content_shapes:
         _migrate_single_shape(dst_slide, shape, mapping, src_slide)
 
+    for mc_el, ml, mt, mw, mh in mc_elements:
+        _migrate_mc_element(dst_slide, mc_el, ml, mt, mw, mh, mapping, src_slide)
+
 
 def _migrate_single_shape(dst_slide, shape, mapping, src_slide):
     if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
@@ -224,7 +333,7 @@ def _migrate_single_shape(dst_slide, shape, mapping, src_slide):
     elif hasattr(shape, 'has_chart') and shape.has_chart:
         _migrate_chart(dst_slide, shape, mapping, src_slide)
     else:
-        _migrate_generic_shape(dst_slide, shape, mapping)
+        _migrate_generic_shape(dst_slide, shape, mapping, src_slide)
 
 
 def _migrate_picture(dst_slide, shape, mapping):
@@ -237,12 +346,14 @@ def _migrate_picture(dst_slide, shape, mapping):
     )
 
 
-def _migrate_generic_shape(dst_slide, shape, mapping):
+def _migrate_generic_shape(dst_slide, shape, mapping, src_slide):
     new_el = deepcopy(shape._element)
     new_left, new_top, new_width, new_height = map_position(
         shape.left, shape.top, shape.width, shape.height, mapping
     )
     xfrm = new_el.find('.//a:xfrm', NSMAP)
+    if xfrm is None:
+        xfrm = new_el.find('p:xfrm', NSMAP)
     if xfrm is not None:
         off = xfrm.find('a:off', NSMAP)
         if off is not None:
@@ -252,6 +363,23 @@ def _migrate_generic_shape(dst_slide, shape, mapping):
         if ext is not None:
             ext.set('cx', str(new_width))
             ext.set('cy', str(new_height))
+
+    r_ns = NSMAP['r']
+    r_attrs = [f'{{{r_ns}}}{a}' for a in ('embed', 'link', 'id', 'dm', 'lo', 'qs', 'cs')]
+    rId_map = {}
+    for el in new_el.iter():
+        for attr in r_attrs:
+            val = el.get(attr)
+            if val and val not in rId_map and val in src_slide.part.rels:
+                rel = src_slide.part.rels[val]
+                if rel.is_external:
+                    new_rId = dst_slide.part.relate_to(rel.target_ref, rel.reltype, is_external=True)
+                else:
+                    new_rId = dst_slide.part.relate_to(rel.target_part, rel.reltype)
+                rId_map[val] = new_rId
+    if rId_map:
+        _remap_rids(new_el, rId_map)
+
     dst_slide.shapes._spTree.append(new_el)
 
 
