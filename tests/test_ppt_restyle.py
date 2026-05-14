@@ -219,3 +219,150 @@ class TestRestyle:
     def test_missing_template_raises(self, source_pptx, tmp_path):
         with pytest.raises(FileNotFoundError):
             restyle(source_pptx, "/nonexistent.pptx", str(tmp_path / "out.pptx"))
+
+
+from scripts.ppt_restyle import (
+    _copy_slide_animations, _get_content_shape_ids, _filter_orphaned_animations
+)
+from lxml import etree
+from copy import deepcopy
+
+
+NSMAP_TEST = {
+    'p': 'http://schemas.openxmlformats.org/presentationml/2006/main',
+    'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
+}
+
+
+def _add_animation_to_slide(slide, shape_ids):
+    """Inject a p:timing element targeting the given shape IDs."""
+    p_ns = NSMAP_TEST['p']
+    timing = etree.SubElement(slide._element, f'{{{p_ns}}}timing')
+    tnLst = etree.SubElement(timing, f'{{{p_ns}}}tnLst')
+    par = etree.SubElement(tnLst, f'{{{p_ns}}}par')
+    cTn = etree.SubElement(par, f'{{{p_ns}}}cTn', attrib={'id': '1', 'dur': 'indefinite', 'restart': 'never', 'nodeType': 'tmRoot'})
+    childTnLst = etree.SubElement(cTn, f'{{{p_ns}}}childTnLst')
+    seq = etree.SubElement(childTnLst, f'{{{p_ns}}}seq', attrib={'concurrent': '1', 'nextAc': 'seek'})
+    seq_cTn = etree.SubElement(seq, f'{{{p_ns}}}cTn', attrib={'id': '2', 'dur': 'indefinite', 'nodeType': 'mainSeq'})
+    seq_childTnLst = etree.SubElement(seq_cTn, f'{{{p_ns}}}childTnLst')
+    for i, spid in enumerate(shape_ids):
+        click_par = etree.SubElement(seq_childTnLst, f'{{{p_ns}}}par')
+        click_cTn = etree.SubElement(click_par, f'{{{p_ns}}}cTn', attrib={'id': str(10 + i), 'fill': 'hold'})
+        inner_list = etree.SubElement(click_cTn, f'{{{p_ns}}}childTnLst')
+        anim_par = etree.SubElement(inner_list, f'{{{p_ns}}}par')
+        anim_cTn = etree.SubElement(anim_par, f'{{{p_ns}}}cTn', attrib={'id': str(20 + i), 'presetID': '1', 'presetClass': 'entr', 'fill': 'hold'})
+        stCondLst = etree.SubElement(anim_cTn, f'{{{p_ns}}}stCondLst')
+        cond = etree.SubElement(stCondLst, f'{{{p_ns}}}cond', attrib={'delay': '0'})
+        anim_cTn_child = etree.SubElement(anim_cTn, f'{{{p_ns}}}childTnLst')
+        set_el = etree.SubElement(anim_cTn_child, f'{{{p_ns}}}set')
+        set_cBhvr = etree.SubElement(set_el, f'{{{p_ns}}}cBhvr')
+        set_cTn2 = etree.SubElement(set_cBhvr, f'{{{p_ns}}}cTn', attrib={'id': str(30 + i), 'dur': '1', 'fill': 'hold'})
+        tgtEl = etree.SubElement(set_cBhvr, f'{{{p_ns}}}tgtEl')
+        spTgt = etree.SubElement(tgtEl, f'{{{p_ns}}}spTgt', attrib={'spid': str(spid)})
+
+
+class TestAnimationFiltering:
+    def test_template_animations_stripped(self, template_pptx, tmp_path):
+        """模板自带的动画应在输出中被清除。"""
+        tpl_prs = Presentation(template_pptx)
+        title_spid = tpl_prs.slides[0].shapes[0].shape_id
+        _add_animation_to_slide(tpl_prs.slides[0], [title_spid])
+        tpl_path = str(tmp_path / "tpl_with_anim.pptx")
+        tpl_prs.save(tpl_path)
+
+        src_prs = Presentation()
+        slide = src_prs.slides.add_slide(src_prs.slide_layouts[0])
+        slide.placeholders[0].text = "Cover"
+        src_path = str(tmp_path / "src_no_anim.pptx")
+        src_prs.save(src_path)
+
+        output_path = str(tmp_path / "out.pptx")
+        restyle(src_path, tpl_path, output_path)
+
+        result = Presentation(output_path)
+        timing = result.slides[0]._element.find(
+            'p:timing', NSMAP_TEST
+        )
+        assert timing is None
+
+    def test_content_animations_kept(self, template_pptx, tmp_path):
+        """内容区域形状的动画应保留。"""
+        src_prs = Presentation()
+        src_prs.slides.add_slide(src_prs.slide_layouts[0])
+        src_prs.slides[0].placeholders[0].text = "Cover"
+        content_slide = src_prs.slides.add_slide(src_prs.slide_layouts[1])
+        content_slide.placeholders[0].text = "Page"
+        txBox = content_slide.shapes.add_textbox(
+            Inches(2), Inches(3), Inches(5), Inches(1)
+        )
+        txBox.text_frame.text = "animated content"
+        content_spid = txBox.shape_id
+        _add_animation_to_slide(content_slide, [content_spid])
+        src_path = str(tmp_path / "src.pptx")
+        src_prs.save(src_path)
+
+        output_path = str(tmp_path / "out.pptx")
+        restyle(src_path, template_pptx, output_path)
+
+        result = Presentation(output_path)
+        timing = result.slides[1]._element.find('p:timing', NSMAP_TEST)
+        assert timing is not None
+        targets = timing.findall(
+            f'.//{{{NSMAP_TEST["p"]}}}spTgt'
+        )
+        target_ids = {t.get('spid') for t in targets}
+        assert str(content_spid) in target_ids
+
+    def test_title_animations_removed(self, template_pptx, tmp_path):
+        """源 PPT 标题形状的动画不应出现在输出中。"""
+        src_prs = Presentation()
+        src_prs.slides.add_slide(src_prs.slide_layouts[0])
+        src_prs.slides[0].placeholders[0].text = "Cover"
+        content_slide = src_prs.slides.add_slide(src_prs.slide_layouts[1])
+        content_slide.placeholders[0].text = "Titled"
+        title_spid = content_slide.placeholders[0].shape_id
+        _add_animation_to_slide(content_slide, [title_spid])
+        src_path = str(tmp_path / "src.pptx")
+        src_prs.save(src_path)
+
+        output_path = str(tmp_path / "out.pptx")
+        restyle(src_path, template_pptx, output_path)
+
+        result = Presentation(output_path)
+        timing = result.slides[1]._element.find('p:timing', NSMAP_TEST)
+        if timing is not None:
+            targets = timing.findall(
+                f'.//{{{NSMAP_TEST["p"]}}}spTgt'
+            )
+            target_ids = {t.get('spid') for t in targets}
+            assert str(title_spid) not in target_ids
+
+    def test_mixed_animations_filters_correctly(self, template_pptx, tmp_path):
+        """同时有标题和内容动画时，只保留内容动画。"""
+        src_prs = Presentation()
+        src_prs.slides.add_slide(src_prs.slide_layouts[0])
+        src_prs.slides[0].placeholders[0].text = "Cover"
+        content_slide = src_prs.slides.add_slide(src_prs.slide_layouts[1])
+        content_slide.placeholders[0].text = "Mixed"
+        txBox = content_slide.shapes.add_textbox(
+            Inches(2), Inches(3), Inches(5), Inches(1)
+        )
+        txBox.text_frame.text = "keep this animation"
+        title_spid = content_slide.placeholders[0].shape_id
+        content_spid = txBox.shape_id
+        _add_animation_to_slide(content_slide, [title_spid, content_spid])
+        src_path = str(tmp_path / "src.pptx")
+        src_prs.save(src_path)
+
+        output_path = str(tmp_path / "out.pptx")
+        restyle(src_path, template_pptx, output_path)
+
+        result = Presentation(output_path)
+        timing = result.slides[1]._element.find('p:timing', NSMAP_TEST)
+        assert timing is not None
+        targets = timing.findall(
+            f'.//{{{NSMAP_TEST["p"]}}}spTgt'
+        )
+        target_ids = {t.get('spid') for t in targets}
+        assert str(content_spid) in target_ids
+        assert str(title_spid) not in target_ids

@@ -631,6 +631,64 @@ def _get_all_shape_ids(slide):
     return spids
 
 
+def _get_content_shape_ids(src_slide):
+    spids = {str(s.shape_id) for s in get_content_shapes(src_slide)}
+    title_shape = _find_title_shape(src_slide)
+    header_bottom = (title_shape.top + title_shape.height + Emu(150000)) if title_shape else 0
+    p_ns = NSMAP['p']
+    for mc_el, _, _, _, _ in _get_mc_elements(src_slide, header_bottom):
+        choice = mc_el.find('mc:Choice', NSMAP)
+        if choice is None:
+            continue
+        for tag_local in SHAPE_TAGS:
+            el = choice.find(f'{{{p_ns}}}{tag_local}')
+            if el is not None:
+                for cNvPr in el.iter(f'{{{p_ns}}}cNvPr'):
+                    sid = cNvPr.get('id')
+                    if sid:
+                        spids.add(sid)
+                    break
+    return spids
+
+
+def _deduplicate_template_ids(slide, template_elements):
+    p_ns = NSMAP['p']
+    spTree = slide._element.find('p:cSld/p:spTree', NSMAP)
+    if spTree is None:
+        return
+
+    migrated_ids = set()
+    for child in spTree:
+        if child not in template_elements:
+            for cNvPr in child.iter(f'{{{p_ns}}}cNvPr'):
+                sid = cNvPr.get('id')
+                if sid:
+                    migrated_ids.add(sid)
+                break
+
+    if not migrated_ids:
+        return
+
+    all_ids = set()
+    for child in spTree:
+        for cNvPr in child.iter(f'{{{p_ns}}}cNvPr'):
+            sid = cNvPr.get('id')
+            if sid:
+                all_ids.add(int(sid))
+            break
+    next_id = max(all_ids) + 1 if all_ids else 1
+
+    for child in spTree:
+        if child not in template_elements:
+            continue
+        for cNvPr in child.iter(f'{{{p_ns}}}cNvPr'):
+            sid = cNvPr.get('id')
+            if sid and sid in migrated_ids:
+                cNvPr.set('id', str(next_id))
+                next_id += 1
+            break
+
+
 def _filter_orphaned_animations(timing_el, valid_spids):
     p_ns = NSMAP['p']
     for seq in timing_el.iter(f'{{{p_ns}}}seq'):
@@ -655,13 +713,15 @@ def _filter_orphaned_animations(timing_el, valid_spids):
                 childTnLst.remove(click_par)
 
 
-def _copy_slide_animations(src_slide, dst_slide):
+def _copy_slide_animations(src_slide, dst_slide, content_spids=None):
     src_el = src_slide._element
     dst_el = dst_slide._element
 
-    dst_spids = _get_all_shape_ids(dst_slide)
-
     for tag in ('p:transition', 'p:timing'):
+        dst_node = dst_el.find(tag, NSMAP)
+        if dst_node is not None:
+            dst_el.remove(dst_node)
+
         src_node = src_el.find(tag, NSMAP)
         if src_node is None:
             continue
@@ -686,11 +746,9 @@ def _copy_slide_animations(src_slide, dst_slide):
             _remap_rids(new_node, rId_map)
 
         if tag == 'p:timing':
-            _filter_orphaned_animations(new_node, dst_spids)
+            valid_spids = content_spids if content_spids is not None else _get_all_shape_ids(dst_slide)
+            _filter_orphaned_animations(new_node, valid_spids)
 
-        dst_node = dst_el.find(tag, NSMAP)
-        if dst_node is not None:
-            dst_el.remove(dst_node)
         dst_el.append(new_node)
 
 
@@ -715,7 +773,7 @@ def restyle(source_path, template_path, output_path):
 
     cover_title = get_title_text(src_prs.slides[0])
     set_title_text(prs.slides[0], cover_title)
-    _copy_slide_animations(src_prs.slides[0], prs.slides[0])
+    _copy_slide_animations(src_prs.slides[0], prs.slides[0], content_spids=set())
 
     template_slide_index = 1
     has_content_slides = False
@@ -731,8 +789,19 @@ def restyle(source_path, template_path, output_path):
         has_content_slides = True
         new_slide = duplicate_slide(prs, template_slide_index)
         set_title_text(new_slide, title)
+
+        spTree = new_slide._element.find('p:cSld/p:spTree', NSMAP)
+        template_elements = set()
+        for child in spTree:
+            tag = _tag_local(child)
+            if tag in SHAPE_TAGS or tag == 'AlternateContent':
+                template_elements.add(child)
+
         migrate_content(new_slide, src_slide, content_bounds)
-        _copy_slide_animations(src_slide, new_slide)
+        _deduplicate_template_ids(new_slide, template_elements)
+
+        content_spids = _get_content_shape_ids(src_slide)
+        _copy_slide_animations(src_slide, new_slide, content_spids=content_spids)
 
     remove_slide(prs, template_slide_index)
 
