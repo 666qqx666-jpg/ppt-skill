@@ -138,3 +138,40 @@ class TestCoordinateMapping:
         mapping = (0.5, 0, 0, 0, 0)
         result = map_position(200, 400, 100, 100, mapping)
         assert result == (100, 200, 50, 50)
+
+
+from scripts.ppt_restyle import migrate_content, get_content_area_bounds
+
+
+class TestShapeMigration:
+    def test_migrate_textbox(self, template_pptx, source_pptx):
+        tpl = Presentation(template_pptx)
+        src = Presentation(source_pptx)
+        dst_bounds = get_content_area_bounds(tpl.slides[1])
+
+        dst_slide = duplicate_slide(tpl, 1)
+        migrate_content(dst_slide, src.slides[1], dst_bounds)
+
+        texts = [s.text_frame.text for s in dst_slide.shapes if s.has_text_frame]
+        assert any("额外文本框内容" in t for t in texts)
+
+    def test_migrate_table(self, template_pptx, source_pptx):
+        tpl = Presentation(template_pptx)
+        src = Presentation(source_pptx)
+        dst_bounds = get_content_area_bounds(tpl.slides[1])
+
+        dst_slide = duplicate_slide(tpl, 1)
+        migrate_content(dst_slide, src.slides[2], dst_bounds)
+
+        tables = [s for s in dst_slide.shapes if s.has_table]
+        assert len(tables) >= 1
+        assert tables[0].table.cell(0, 0).text == "A"
+
+    def test_migrate_empty_slide_no_crash(self, template_pptx, tmp_path):
+        tpl = Presentation(template_pptx)
+        empty_prs = Presentation()
+        empty_slide = empty_prs.slides.add_slide(empty_prs.slide_layouts[6])
+        dst_bounds = get_content_area_bounds(tpl.slides[1])
+
+        dst_slide = duplicate_slide(tpl, 1)
+        migrate_content(dst_slide, empty_slide, dst_bounds)

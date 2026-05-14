@@ -190,3 +190,94 @@ def map_position(left, top, width, height, mapping):
     new_width = int(width * scale)
     new_height = int(height * scale)
     return (new_left, new_top, new_width, new_height)
+
+
+def get_content_area_bounds(slide):
+    ph = _find_content_placeholder(slide)
+    if ph:
+        return (ph.left, ph.top, ph.left + ph.width, ph.top + ph.height)
+    raise ValueError("无法确定内容区域边界")
+
+
+def migrate_content(dst_slide, src_slide, dst_bounds):
+    content_shapes = get_content_shapes(src_slide)
+    if not content_shapes:
+        return
+
+    content_ph = _find_content_placeholder(dst_slide)
+    if content_ph:
+        content_ph._element.getparent().remove(content_ph._element)
+
+    src_bounds = compute_bounding_box(content_shapes)
+    if src_bounds is None:
+        return
+
+    mapping = compute_mapping(src_bounds, dst_bounds)
+
+    for shape in content_shapes:
+        _migrate_single_shape(dst_slide, shape, mapping, src_slide)
+
+
+def _migrate_single_shape(dst_slide, shape, mapping, src_slide):
+    if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+        _migrate_picture(dst_slide, shape, mapping)
+    elif hasattr(shape, 'has_chart') and shape.has_chart:
+        _migrate_chart(dst_slide, shape, mapping, src_slide)
+    else:
+        _migrate_generic_shape(dst_slide, shape, mapping)
+
+
+def _migrate_picture(dst_slide, shape, mapping):
+    new_left, new_top, new_width, new_height = map_position(
+        shape.left, shape.top, shape.width, shape.height, mapping
+    )
+    image_stream = BytesIO(shape.image.blob)
+    dst_slide.shapes.add_picture(
+        image_stream, new_left, new_top, new_width, new_height
+    )
+
+
+def _migrate_generic_shape(dst_slide, shape, mapping):
+    new_el = deepcopy(shape._element)
+    new_left, new_top, new_width, new_height = map_position(
+        shape.left, shape.top, shape.width, shape.height, mapping
+    )
+    xfrm = new_el.find('.//a:xfrm', NSMAP)
+    if xfrm is not None:
+        off = xfrm.find('a:off', NSMAP)
+        if off is not None:
+            off.set('x', str(new_left))
+            off.set('y', str(new_top))
+        ext = xfrm.find('a:ext', NSMAP)
+        if ext is not None:
+            ext.set('cx', str(new_width))
+            ext.set('cy', str(new_height))
+    dst_slide.shapes._spTree.append(new_el)
+
+
+def _migrate_chart(dst_slide, shape, mapping, src_slide):
+    new_el = deepcopy(shape._element)
+    new_left, new_top, new_width, new_height = map_position(
+        shape.left, shape.top, shape.width, shape.height, mapping
+    )
+    xfrm = new_el.find('.//a:xfrm', NSMAP)
+    if xfrm is not None:
+        off = xfrm.find('a:off', NSMAP)
+        if off is not None:
+            off.set('x', str(new_left))
+            off.set('y', str(new_top))
+        ext = xfrm.find('a:ext', NSMAP)
+        if ext is not None:
+            ext.set('cx', str(new_width))
+            ext.set('cy', str(new_height))
+
+    chart_ns = 'http://schemas.openxmlformats.org/drawingml/2006/chart'
+    chart_ref = new_el.find(f'.//{{{chart_ns}}}chart')
+    if chart_ref is not None:
+        old_rId = chart_ref.get(f'{{{NSMAP["r"]}}}id')
+        if old_rId and old_rId in src_slide.part.rels:
+            rel = src_slide.part.rels[old_rId]
+            new_rId = dst_slide.part.relate_to(rel.target_part, rel.reltype)
+            chart_ref.set(f'{{{NSMAP["r"]}}}id', new_rId)
+
+    dst_slide.shapes._spTree.append(new_el)
