@@ -281,3 +281,81 @@ def _migrate_chart(dst_slide, shape, mapping, src_slide):
             chart_ref.set(f'{{{NSMAP["r"]}}}id', new_rId)
 
     dst_slide.shapes._spTree.append(new_el)
+
+
+def restyle(source_path, template_path, output_path):
+    if not os.path.exists(source_path):
+        raise FileNotFoundError(f"源文件不存在: {source_path}")
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(f"模板文件不存在: {template_path}")
+
+    os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+
+    template_prs = Presentation(template_path)
+    validate_template(template_prs)
+    content_bounds = get_content_area_bounds(template_prs.slides[1])
+
+    src_prs = Presentation(source_path)
+    if len(src_prs.slides) == 0:
+        raise ValueError("源 PPT 没有任何幻灯片")
+
+    shutil.copy2(template_path, output_path)
+    prs = Presentation(output_path)
+
+    cover_title = get_title_text(src_prs.slides[0])
+    set_title_text(prs.slides[0], cover_title)
+
+    template_slide_index = 1
+    has_content_slides = False
+
+    for i in range(1, len(src_prs.slides)):
+        src_slide = src_prs.slides[i]
+        title = get_title_text(src_slide)
+        shapes = get_content_shapes(src_slide)
+
+        if not shapes and not title:
+            continue
+
+        has_content_slides = True
+        new_slide = duplicate_slide(prs, template_slide_index)
+        set_title_text(new_slide, title)
+        migrate_content(new_slide, src_slide, content_bounds)
+
+    remove_slide(prs, template_slide_index)
+
+    if not has_content_slides and len(src_prs.slides) == 1:
+        pass  # 仅保留封面
+
+    prs.save(output_path)
+    return output_path
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("用法: python ppt_restyle.py <源PPT路径> [模板路径] [输出路径]")
+        sys.exit(1)
+
+    source = sys.argv[1]
+    base_dir = Path(__file__).parent.parent
+
+    template = (
+        sys.argv[2] if len(sys.argv) > 2
+        else str(base_dir / 'templates' / 'template.pptx')
+    )
+
+    if len(sys.argv) > 3:
+        output = sys.argv[3]
+    else:
+        source_name = Path(source).stem
+        output = str(base_dir / 'output' / f'{source_name}_styled.pptx')
+
+    try:
+        result = restyle(source, template, output)
+        print(f"转换完成: {result}")
+    except Exception as e:
+        print(f"转换失败: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()

@@ -175,3 +175,47 @@ class TestShapeMigration:
 
         dst_slide = duplicate_slide(tpl, 1)
         migrate_content(dst_slide, empty_slide, dst_bounds)
+
+
+from scripts.ppt_restyle import restyle
+
+
+class TestRestyle:
+    def test_full_restyle(self, template_pptx, source_pptx, tmp_path):
+        output_path = str(tmp_path / "output.pptx")
+        restyle(source_pptx, template_pptx, output_path)
+
+        result = Presentation(output_path)
+        # 封面 + 2 内容页 = 3 页
+        assert len(result.slides) == 3
+
+    def test_cover_title_replaced(self, template_pptx, source_pptx, tmp_path):
+        output_path = str(tmp_path / "output.pptx")
+        restyle(source_pptx, template_pptx, output_path)
+
+        result = Presentation(output_path)
+        assert get_title_text(result.slides[0]) == "我的演示文稿"
+
+    def test_content_title_replaced(self, template_pptx, source_pptx, tmp_path):
+        output_path = str(tmp_path / "output.pptx")
+        restyle(source_pptx, template_pptx, output_path)
+
+        result = Presentation(output_path)
+        assert get_title_text(result.slides[1]) == "第一节标题"
+        assert get_title_text(result.slides[2]) == "数据表格"
+
+    def test_single_slide_source(self, template_pptx, source_single_slide_pptx, tmp_path):
+        output_path = str(tmp_path / "output.pptx")
+        restyle(source_single_slide_pptx, template_pptx, output_path)
+
+        result = Presentation(output_path)
+        assert len(result.slides) == 1
+        assert get_title_text(result.slides[0]) == "仅封面"
+
+    def test_missing_source_raises(self, template_pptx, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            restyle("/nonexistent.pptx", template_pptx, str(tmp_path / "out.pptx"))
+
+    def test_missing_template_raises(self, source_pptx, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            restyle(source_pptx, "/nonexistent.pptx", str(tmp_path / "out.pptx"))
