@@ -136,3 +136,57 @@ def set_title_text(slide, text):
             p._p.getparent().remove(p._p)
     else:
         tf.text = text
+
+
+def get_content_shapes(slide):
+    title_ph = _find_title_placeholder(slide)
+    title_el = title_ph._element if title_ph else None
+
+    content = []
+    for shape in slide.shapes:
+        if shape._element is title_el:
+            continue
+        try:
+            ph_fmt = shape.placeholder_format
+        except ValueError:
+            ph_fmt = None
+        if ph_fmt is not None:
+            if ph_fmt.idx in (0, 10, 11, 12):
+                continue
+        content.append(shape)
+    return content
+
+
+def compute_bounding_box(shapes):
+    if not shapes:
+        return None
+    left = min(s.left for s in shapes)
+    top = min(s.top for s in shapes)
+    right = max(s.left + s.width for s in shapes)
+    bottom = max(s.top + s.height for s in shapes)
+    return (left, top, right, bottom)
+
+
+def compute_mapping(src_bounds, dst_bounds):
+    src_left, src_top, src_right, src_bottom = src_bounds
+    dst_left, dst_top, dst_right, dst_bottom = dst_bounds
+
+    src_w = src_right - src_left
+    src_h = src_bottom - src_top
+    dst_w = dst_right - dst_left
+    dst_h = dst_bottom - dst_top
+
+    if src_w == 0 or src_h == 0:
+        return (1.0, dst_left, dst_top, src_left, src_top)
+
+    scale = min(dst_w / src_w, dst_h / src_h)
+    return (scale, dst_left, dst_top, src_left, src_top)
+
+
+def map_position(left, top, width, height, mapping):
+    scale, dst_left, dst_top, src_left, src_top = mapping
+    new_left = int((left - src_left) * scale + dst_left)
+    new_top = int((top - src_top) * scale + dst_top)
+    new_width = int(width * scale)
+    new_height = int(height * scale)
+    return (new_left, new_top, new_width, new_height)
