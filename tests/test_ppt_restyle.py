@@ -51,3 +51,22 @@ class TestSlideOperations:
         assert len(prs.slides) == 3
         remove_slide(prs, 2)
         assert len(prs.slides) == 2
+
+
+from scripts.ppt_restyle import get_title_text, set_title_text
+
+
+class TestTitleOperations:
+    def test_get_title_text(self, template_pptx):
+        prs = Presentation(template_pptx)
+        assert get_title_text(prs.slides[0]) == "模板标题"
+
+    def test_get_title_text_empty(self, tmp_path):
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])  # Blank layout
+        assert get_title_text(slide) == ""
+
+    def test_set_title_text(self, template_pptx):
+        prs = Presentation(template_pptx)
+        set_title_text(prs.slides[0], "新标题")
+        assert get_title_text(prs.slides[0]) == "新标题"

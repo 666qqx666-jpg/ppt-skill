@@ -107,3 +107,32 @@ def remove_slide(prs, slide_index):
     rId = sldId.get(f'{{{NSMAP["r"]}}}id')
     prs.part.drop_rel(rId)
     rId_lst.remove(sldId)
+
+
+def get_title_text(slide):
+    ph = _find_title_placeholder(slide)
+    if ph and ph.has_text_frame:
+        return ph.text_frame.text
+    for shape in slide.shapes:
+        if shape.has_text_frame and shape.name.lower().startswith('title'):
+            return shape.text_frame.text
+    return ""
+
+
+def set_title_text(slide, text):
+    ph = _find_title_placeholder(slide)
+    if not ph or not ph.has_text_frame:
+        return
+    tf = ph.text_frame
+    if tf.paragraphs:
+        para = tf.paragraphs[0]
+        if para.runs:
+            para.runs[0].text = text
+            for run in para.runs[1:]:
+                run._r.getparent().remove(run._r)
+        else:
+            para.text = text
+        for p in tf.paragraphs[1:]:
+            p._p.getparent().remove(p._p)
+    else:
+        tf.text = text
